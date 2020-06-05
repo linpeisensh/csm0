@@ -34,8 +34,8 @@ def convert_3d_to_uv_coordinates(points):
     """
     Converts 3D points to UV parameters
 
-    :param points: A (None, 3) tensor/numpy array of 3d points
-    :return: A (None, 2) tensor/np array of Uv values for the points
+    :param points: A (..., 3) tensor/ (None, 3) np array of 3d points
+    :return: A (..., 2) tensor/ (None, 3) np array of UV values for the points
     """
     eps = 1E-4
     if type(points) == torch.Tensor:
@@ -55,11 +55,12 @@ def convert_3d_to_uv_coordinates(points):
         return np.stack([u, v], axis=1)
 
 
-def get_scaled_orthographic_projection(scale, trans, quat, device='cuda:0'):
+def get_scaled_orthographic_projection(scale, trans, quat, device='cuda'):
     """
     Generate scaled orthographic projection matrices rotation and translation
     for the given scale, translation and rotation in quaternions
 
+    :param device: Device to store the output tensor default cuda
     :param scale: A [B, 1] tensor with the scale values for the batch
     :param trans: A [B, 2] tensor with tx and ty values for the batch
     :param quat: A [B, 4] tensor with quaternion values for the batch
@@ -70,15 +71,14 @@ def get_scaled_orthographic_projection(scale, trans, quat, device='cuda:0'):
     """
 
     translation = torch.cat((trans, torch.ones(
-        [trans.size(0), 1], dtype=torch.float, device=device)*5), dim=1)
+        [trans.size(0), 1], dtype=torch.float, device=device) * 5), dim=1)
 
     scale_matrix = torch.zeros((scale.size(0), 3, 3), device=device)
     scale_matrix[:, 0, 0] = scale
     scale_matrix[:, 1, 1] = scale
     scale_matrix[:, 2, 2] = scale
     
-    rotation = quaternion_to_matrix(quat).permute(0, 2, 1)
-    # TODO: Move the transpose to the CSM model
+    rotation = quaternion_to_matrix(quat)
     rotation = torch.matmul(scale_matrix, rotation)
     
     return rotation, translation
@@ -142,9 +142,10 @@ def get_gt_positions_grid(img_size):
     return grid
 
 
-def load_mean_shape(mean_shape_path, device='cuda:0'):
+def load_mean_shape(mean_shape_path, device='cuda'):
     """
     Loads mean shape parameters from the mat file from mean_shape_path
+    :param device: Default cuda
     :param mean_shape_path: Path to the mat file
     :return: A dictionary containing the following parameters
 

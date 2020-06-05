@@ -1,9 +1,11 @@
 import os.path as osp
 
 import torch
-
+import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
-from src.utils.utils import get_date, get_time
+
+from src.utils.config import ConfigParser
+from src.utils.utils import get_date, get_time, create_dir_if_not_exists
 
 
 class ITrainer:
@@ -13,7 +15,7 @@ class ITrainer:
     and calculate_loss functions for the trainer to work.
     """
 
-    def __init__(self, config):
+    def __init__(self, config: ConfigParser.ConfigObject):
         """
         :param config: A dictionary containing the following parameters.
 
@@ -34,8 +36,14 @@ class ITrainer:
         self.data_loader = self._get_data_loader()
         self.optimizer = self._get_optimizer(config)
 
-        self.summary_dir = osp.join(self.config.out_dir, 'summaries', get_date(), get_time())
+        time = get_time()
+        date = get_date()
+        self.summary_dir = osp.join(self.config.out_dir, date, time, 'summaries')
+        self.checkpoint_dir = osp.join(self.config.out_dir, date, time, 'checkpoints')
+        create_dir_if_not_exists(self.checkpoint_dir)
+
         self.summary_writer = SummaryWriter(self.summary_dir)
+        torch.autograd.set_detect_anomaly(True)
 
     def train(self):
         """
@@ -52,16 +60,32 @@ class ITrainer:
                 
                 self._batch_start_call(batch, step, len(self.data_loader), epoch, self.config.epochs)
                 
-                loss = self._train_step(step, batch, epoch)
+                loss, out = self._train_step(step, batch, epoch)
                 running_loss += loss.item()
                 
-                self._batch_end_call(batch, loss, step, len(self.data_loader), 
+                self._batch_end_call(batch, loss, out, step, len(self.data_loader),
                                      epoch, self.config.epochs)
             
             epoch_loss = running_loss / len(self.data_loader)
-            self.summary_writer.add_scalar('Loss/train', epoch_loss, epoch)
+            self.summary_writer.add_scalar('loss/train', epoch_loss, epoch)
             
-            self._epoch_end_call(epoch, self.config.epochs)            
+            self._epoch_end_call(epoch, self.config.epochs, len(self.data_loader))
+
+    def _train_step(self, step, batch, epoch) -> (torch.Tensor, None):
+        """
+        Optimization step for each batch of data
+        Calculating the loss and perform gradient optimization for the batch
+
+        :param batch: Batch data from the dataloader
+        :return: The loss for the batch
+        """
+
+        self.model.zero_grad()
+        loss, out = self._calculate_loss(step, batch, epoch)
+        loss.backward()
+        self.optimizer.step()
+
+        return loss, out
 
     def _save_model(self, path):
         """
@@ -72,7 +96,7 @@ class ITrainer:
 
         if path is not None and path != '':
             torch.save(self.model.state_dict(), path)
-            print('Saving model at %s' % path)
+            print('Saving model weights at %s' % path)
 
     def _load_model(self, path):
         """
@@ -83,23 +107,7 @@ class ITrainer:
 
         if path is not None and path != '' and osp.exists(path):
             self.model.load_state_dict(torch.load(path))
-            print('Loaded model from %s' % path)
-
-    def _train_step(self, step, batch, epoch):
-        """
-        Optimization step for each batch of data
-        Calculating the loss and perform gradient optimization for the batch
-
-        :param batch: Batch data from the dataloader
-        :return: The loss for the batch
-        """
-
-        self.model.zero_grad()
-        loss = self._calculate_loss(step, batch, epoch)
-        loss.backward()
-        self.optimizer.step()
-
-        return loss
+            print('Loaded model weights from %s' % path)
 
     def _get_optimizer(self, config):
         """
@@ -119,7 +127,7 @@ class ITrainer:
 
         return AttributeError('Invalid optimizer type %s' % config.optim.type)
 
-    def _get_data_loader(self):
+    def _get_data_loader(self) -> torch.utils.data.DataLoader:
         """
         Must be implemented by the child class.
         Should return a torch.utils.data.DataLoader which contains the data as a dictionary
@@ -127,7 +135,7 @@ class ITrainer:
 
         return NotImplementedError
 
-    def _get_model(self):
+    def _get_model(self) -> torch.nn.Module:
         """
         Must be implemented by the child class
         Should return a torch model which will be optimized during the training
@@ -135,7 +143,7 @@ class ITrainer:
 
         return NotImplementedError
 
-    def _calculate_loss(self, step, batch, epoch):
+    def _calculate_loss(self, step, batch, epoch) -> (torch.Tensor, None):
         """
         Must be implemented by the child class.
 
@@ -162,15 +170,15 @@ class ITrainer:
 
         return
     
-    def _batch_end_call(self, batch, loss, step, total_steps, epoch, total_epochs):
+    def _batch_end_call(self, batch, loss, out, step, total_steps, epoch, total_epochs):
         """
         This function will be called after each batch has been used for optimization
         Use this function to print and/or load any metrics after each 
         batch has been processed
 
         :param batch: Batch data
-        :param loss: Loss calcuated for the batch
-        :param type: FloatTensor
+        :param loss: Loss calculated for the batch
+        :param loss: FloatTensor
         :param step: Current batch number
         :type step: Int
         :param total_steps: Total number of batches
@@ -185,7 +193,7 @@ class ITrainer:
     
     def _epoch_start_call(self, epoch, total_epochs):
         """
-        This function is called at the begining of the each epoch
+        This function is called at the beginning of the each epoch
         Use this function to do anything before the start of each epoch
 
         :param epoch: Current epoch
@@ -196,7 +204,7 @@ class ITrainer:
         
         return
 
-    def _epoch_end_call(self, epoch, total_epochs):
+    def _epoch_end_call(self, epoch, total_epochs, total_steps):
         """
         This function is called at the end of the each epoch
         Use this function to do anything at the end of each epoch 

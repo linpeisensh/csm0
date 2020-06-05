@@ -1,13 +1,11 @@
 # Canonical Surface Mapping (CSM)
 
+Katam Harinandan Teja, Peisen Lin, Daniel Scholz, Letian Shi, Rodriguez Palafox Pablo
+
 ### Installation
 
-To setup a conda environment run
+Follow the instructions here [installation](resources/docs/INSTALL.md)
 
-`conda env create -f resources/env.yml`
-> The packages will be updated as we progress through the project
+### Train
 
-To update an already existing environment run
- 
- `conda env update -f resources/env.yml`
-
+Please see [train](resources/docs/TRAIN.md)
