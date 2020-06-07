@@ -23,6 +23,14 @@ wget http://www.vision.caltech.edu/visipedia-data/CUB-200-2011/CUB_200_2011.tgz 
 #### Imagenet Data
 * Download the images for the categories from imagenet [here](http://image-net.org/download)
 
+#### PASCAL Data
+* Downlaod the original data from [here](ftp://cs.stanford.edu/cs/cvgl/PASCAL3D+_release1.1.zip)
+
+```
+wget ftp://cs.stanford.edu/cs/cvgl/PASCAL3D+_release1.1.zip & unzip PASCAL3D+_release1.1.zip
+```
+> The actual data contains a lot more than what is used in this project. You can discard them all except for the Images directory
+
 #### Pretrained model
 
 Coming soon ......
@@ -35,6 +43,7 @@ Coming soon ......
     * datasets/
         * cachedir/
         * CUB_200_2011/
+        * PASCAL3D+_release1.1/
         * IMAGNET #TODO - I am not sure about the directory name will update once we get access
     * resources/
     * src/
@@ -56,6 +65,13 @@ python run.py --config config/imnet_train.yml --device cuda:0 train
 ``` 
 > Use device cpu if you want to use the CPU
 
+#### PASCAL3D 1.1
+Currently annotations are only available for car class
+```python 
+python run.py --config config/p3d_train.yml --device cuda:0 train
+``` 
+
+
 #### Config
 
 Most of the parameters required for the training are passed via a config file
@@ -71,4 +87,16 @@ python run.py --config config/bird_train.yml --device cuda:0 train --train.batch
 ```  
 Same level of nesting as in the config file are used in command line updates (eg. train.optim.lr)
 > Run ``python run.py train --help`` for more information
- 
+
+### Summaries & Checkpoints
+By default when you start training all the summaries and the checkpoints are stored in ``out/{date}/{time}/...`` where date and time are when the training started.
+
+#### Summaries
+Summaries are stored using tensorboard. To start tensorboard run
+```
+tensorboard --logdir out/{date}/{time}/summaries/.
+```
+> Please make sure you are in the conda environment or atleast latest tensorboard is available in the environment
+
+#### Checkpoints
+After every few epochs model weights are stored as checkpoints in ``out/{date}/{time}/summaries/``. You can use any checkpoint to preload the weights if you want to start a new training. You just have to update the train.checkpoint config parameter.
