@@ -3,13 +3,14 @@ dataset:
   img_size: 256
   img_height: 320
   img_width: 512
-  split: 'train'
+  split: 'val'
   transform: 'flip'
   padding_frac: 0.05
   jitter_frac: 0.05
   flip: True
   tight_crop: False
   flip_train: True
+  num_pairs: 10000
 
   dir:
     texture: 'resources/color_maps/car/map3.png'
@@ -17,27 +18,16 @@ dataset:
     data_dir: '/mnt/raid/csmteam/datasets/PASCAL3D+_release1.1'
     cache_dir: '/mnt/raid/csmteam/datasets/cachedir/p3d'
 
-train:
-  batch_size: 16
-  epochs: 200
+test:
+  batch_size: 8
   shuffle: True
-  workers: 16
-  checkpoint: ''
+  workers: 8
   out_dir: '/mnt/raid/csmteam/out'
-  use_gt_cam: False
-  use_sampled_cam: False
+  use_gt_cam: True
   num_cam_poses: 8
-  pose_warmup_epochs: 10
+  use_sampled_cam: True
+  alpha: [0.05, 0.1, 0.2]
+  checkpoint: '/mnt/raid/csmteam/out/2020-06-23/200649/checkpoints/model_071810_195'
+  add_summaries: False
   log:
-    image_summary_step: 30
-    image_epoch: 1
-  loss:
-    geometric: 1
-    visibility: 10
-    mask: 1
-    diverse: 0.05
-    quat: 1
-  optim:
-    lr: 0.00008
-    beta1: 0.9
-    type: 'adam'
+    image_summary_step: 1

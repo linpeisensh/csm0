@@ -55,13 +55,13 @@ def convert_3d_to_uv_coordinates(points):
         return np.stack([u, v], axis=1)
 
 
-def get_scaled_orthographic_projection(scale, trans, quat, device='cuda'):
+def get_scaled_orthographic_projection(scale, trans, quat, transpose=False):
     """
     Generate scaled orthographic projection matrices rotation and translation
     for the given scale, translation and rotation in quaternions
 
     :param device: Device to store the output tensor default cuda
-    :param scale: A [B, 1] tensor with the scale values for the batch
+    :param scale: A [B] tensor with the scale values for the batch
     :param trans: A [B, 2] tensor with tx and ty values for the batch
     :param quat: A [B, 4] tensor with quaternion values for the batch
     
@@ -70,6 +70,7 @@ def get_scaled_orthographic_projection(scale, trans, quat, device='cuda'):
         translation - A [B, 3] tensor for translation
     """
 
+    device = scale.device
     translation = torch.cat((trans, torch.ones(
         [trans.size(0), 1], dtype=torch.float, device=device) * 5), dim=1)
 
@@ -79,6 +80,8 @@ def get_scaled_orthographic_projection(scale, trans, quat, device='cuda'):
     scale_matrix[:, 2, 2] = scale
     
     rotation = quaternion_to_matrix(quat)
+    if transpose:
+        rotation = rotation.permute(0, 2, 1)
     rotation = torch.matmul(scale_matrix, rotation)
     
     return rotation, translation
@@ -142,7 +145,7 @@ def get_gt_positions_grid(img_size):
     return grid
 
 
-def load_mean_shape(mean_shape_path, device='cuda'):
+def load_mean_shape(mean_shape_path, device):
     """
     Loads mean shape parameters from the mat file from mean_shape_path
     :param device: Default cuda
@@ -172,3 +175,41 @@ def load_mean_shape(mean_shape_path, device='cuda'):
     mean_shape['faces'] = torch.from_numpy(mean_shape['faces']).long().to(device)
 
     return mean_shape
+
+
+def hamilton_product(qa, qb):
+    """Multiply qa by qb.
+
+    Args:
+        qa: B X N X 4 quaternions
+        qb: B X N X 4 quaternions
+    Returns:
+        q_mult: B X N X 4
+    """
+    qa_0 = qa[:, :, 0]
+    qa_1 = qa[:, :, 1]
+    qa_2 = qa[:, :, 2]
+    qa_3 = qa[:, :, 3]
+
+    qb_0 = qb[:, :, 0]
+    qb_1 = qb[:, :, 1]
+    qb_2 = qb[:, :, 2]
+    qb_3 = qb[:, :, 3]
+
+    # See https://en.wikipedia.org/wiki/Quaternion#Hamilton_product
+    q_mult_0 = qa_0 * qb_0 - qa_1 * qb_1 - qa_2 * qb_2 - qa_3 * qb_3
+    q_mult_1 = qa_0 * qb_1 + qa_1 * qb_0 + qa_2 * qb_3 - qa_3 * qb_2
+    q_mult_2 = qa_0 * qb_2 - qa_1 * qb_3 + qa_2 * qb_0 + qa_3 * qb_1
+    q_mult_3 = qa_0 * qb_3 + qa_1 * qb_2 - qa_2 * qb_1 + qa_3 * qb_0
+
+    return torch.stack([q_mult_0, q_mult_1, q_mult_2, q_mult_3], dim=-1)
+
+
+def quat_conj(q):
+    return torch.cat([q[:, :, [0]], -1 * q[:, :, 1:4]], dim=-1)
+
+
+def quat2ang(q):
+    ang  = 2*torch.acos(torch.clamp(q[:,:,0], min=-1 + 1E-6, max=1-1E-6))
+    ang = ang.unsqueeze(-1)
+    return ang

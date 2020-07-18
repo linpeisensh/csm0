@@ -1,11 +1,11 @@
 import torch
 from pytorch3d.structures import Meshes
 
-from src.model.cam_predictor import CameraPredictor
+from src.model.cam_predictor import CameraPredictor, MultiCameraPredictor
 from src.model.unet import UNet
 from src.model.uv_to_3d import UVto3D
 from src.nnutils.geometry import get_scaled_orthographic_projection, convert_3d_to_uv_coordinates
-from src.nnutils.rendering import MaskRenderer, DepthRenderer
+from src.nnutils.rendering import MaskRenderer, DepthRenderer, MaskAndDepthRenderer
 
 
 class CSM(torch.nn.Module):
@@ -25,7 +25,8 @@ class CSM(torch.nn.Module):
     """
 
     def __init__(self, template_mesh: Meshes, mean_shape: dict,
-                 use_gt_cam: bool = False, device='cuda'):
+                 use_gt_cam: bool = False, num_cam_poses: int = 8, 
+                 use_sampled_cam=False):
         """
         :param template_mesh: A pytorch3d.structures.Meshes object which will used for
         rendering depth and mask for a given camera pose
@@ -37,21 +38,23 @@ class CSM(torch.nn.Module):
         the corresponding UV value in uv_map.
         :param use_gt_cam: True or False. True if you want to use the ground truth camera pose. False if you want to
             use the camera predictor to predict the camera poses
+        :param num_cam_poses: Number of camera hypothesis to be used. Should be used in with use_gt_cam=False
+        :use_sampled_cam: True of False. True if you want the output from the camera pose sampled according 
+            to the probabilities. False if you want output for all the predicted camera poses. 
+            Should be used in with use_gt_cam=False
         :param device: Device to store the tensor. Default: cuda
         """
         super(CSM, self).__init__()
 
-        self.device = device
+        self.unet = UNet(4, 3)
+        self.uv_to_3d = UVto3D(mean_shape)
+        self.renderer = MaskAndDepthRenderer(meshes=template_mesh)
 
-        self.unet = UNet(4, 3).to(self.device)
-        self.uv_to_3d = UVto3D(mean_shape).to(self.device)
-        self.mask_render = MaskRenderer(device=self.device)
-        self.depth_render = DepthRenderer(device=self.device)
-        self.template_mesh = template_mesh
         self.use_gt_cam = use_gt_cam
+        self.use_sampled_cam = use_sampled_cam
 
         if not self.use_gt_cam:
-            self.cam_predictor = CameraPredictor(self.device)
+            self.multi_cam_pred = MultiCameraPredictor(num_hypotheses=num_cam_poses,device=template_mesh.device)
 
     def forward(self, img: torch.Tensor, mask: torch.Tensor,
                 scale: torch.Tensor, trans: torch.Tensor, quat: torch.Tensor):
@@ -87,21 +90,7 @@ class CSM(torch.nn.Module):
         sphere_points = torch.tanh(sphere_points)
         sphere_points = torch.nn.functional.normalize(sphere_points, dim=1)
 
-        if self.use_gt_cam:
-
-            rotation, translation = get_scaled_orthographic_projection(
-                scale, trans, quat, self.device)
-            rotation = rotation.permute(0, 2, 1)
-
-        else:
-
-            pred_scale, pred_trans, pred_quat = self.cam_predictor(img)
-            rotation, translation = get_scaled_orthographic_projection(
-                pred_scale, pred_trans, pred_quat, self.device)
-
-        # TODO: size of 2nd dimension must be equal to number of camera poses used/predicted
-        rotation = rotation.unsqueeze(1)
-        translation = translation.unsqueeze(1)
+        rotation, translation, pred_poses = self._get_camera_extrinsics(img, scale, trans, quat)
 
         # Project the sphere points onto the template and project them back to image plane
         pred_pos, pred_z, uv, uv_3d = self._get_projected_positions_of_sphere_points(
@@ -120,10 +109,38 @@ class CSM(torch.nn.Module):
         }
 
         if not self.use_gt_cam:
-
-            out['pred_poses'] = torch.cat((pred_scale.unsqueeze(-1), pred_trans, pred_quat), dim=-1)
+            out['pred_poses'] = pred_poses
 
         return out
+
+    def _get_camera_extrinsics(self, img, scale, trans, quat):
+
+        batch_size = img.size(0)
+        pred_poses = None
+        
+        if self.use_gt_cam:
+            rotation, translation = get_scaled_orthographic_projection(
+                scale, trans, quat, True)
+        else:
+            cam_pred, sample_idx, pred_poses = self.multi_cam_pred(img)
+            
+            if self.use_sampled_cam:
+                pred_scale, pred_trans, pred_quat, _ = cam_pred
+                rotation, translation = get_scaled_orthographic_projection(
+                    pred_scale, pred_trans, pred_quat)
+            else:
+                pred_scale, pred_trans, pred_quat, _ = pred_poses
+                rotation, translation = get_scaled_orthographic_projection(
+                    pred_scale.view(-1), pred_trans.view(-1, 2), pred_quat.view(-1, 4)
+                )
+                rotation = rotation.view(batch_size, -1, 3, 3)
+                translation = translation.view(batch_size, -1, 3)
+
+        if self.use_gt_cam or self.use_sampled_cam:
+            rotation = rotation.unsqueeze(1)
+            translation = translation.unsqueeze(1)
+        
+        return rotation, translation, pred_poses
 
     def _get_projected_positions_of_sphere_points(self, sphere_points, rotation, translation):
         """
@@ -169,19 +186,18 @@ class CSM(torch.nn.Module):
         batch_size = rotation.size(0)
         cam_poses = rotation.size(1)
 
-        pred_mask, pred_depth = self.depth_render(
-            self.template_mesh.extend(batch_size),
+        pred_mask, pred_depth = self.renderer(
             rotation.view(-1, 3, 3),
             translation.view(-1, 3))
 
         height = pred_mask.size(1)
-        width = pred_mask.size(1)
+        width = pred_mask.size(2)
 
         pred_mask = pred_mask.view(batch_size, cam_poses, 1, height, width)
         pred_depth = pred_depth.view(batch_size, cam_poses, 1, height, width)
 
         # Pytorch renderer returns -1 values for the empty pixels which
         # when directly used results in wrong loss calculation so changing the values to the max + 1
-        pred_depth = pred_depth * pred_mask + (1 - pred_mask) * pred_depth.max()
+        pred_depth = pred_depth * torch.ceil(pred_mask) + (1 - torch.ceil(pred_mask)) * pred_depth.max()
 
         return pred_mask, pred_depth

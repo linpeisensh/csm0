@@ -1,0 +1,13 @@
+Hot key:
+	Translation: scroll wheel
+	Rotation: right button
+	Expand to Groups: G (Double click left button)
+	Create FaceGroup: Ctrl + G
+	Clear FaceGroup: Ctrl + Shift + G
+	Show Wireframe: W
+
+Process:
+	Select
+	Create FaceGroup
+	Generate Complex
+	Split Complexs
