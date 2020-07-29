@@ -33,9 +33,9 @@ from ..nnutils import geom_utils
 from . import base as base_data
 import itertools
 
-flags.DEFINE_string('cub_dir', '/nfs.yoda/nileshk/CorrespNet/datasets/cubs/', 'CUB Data Directory')
+flags.DEFINE_string('cub_dir', '/mnt/raid/csmteam/datasets/CUB_200_2011 ', 'CUB Data Directory')
 curr_path = osp.dirname(osp.abspath(__file__))
-cache_path = osp.join(curr_path, '..', 'cachedir')
+cache_path = '/mnt/raid/csmteam/datasets/cachedir'
 
 flags.DEFINE_string('cub_cache_dir', osp.join(cache_path, 'cub'), 'CUB Data Directory')
 
